@@ -1,0 +1,86 @@
+/* ============================================================
+   KUSHAL MULTI SPECIALITY HOSPITAL — responsive.css
+   Breakpoints: 1200, 992, 768, 560
+   ============================================================ */
+
+@media (max-width: 1200px) {
+  .stats-grid { grid-template-columns: repeat(3, 1fr); }
+  .chart-grid { grid-template-columns: 1fr; }
+  .form-grid-3 { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 992px) {
+  :root { --sidebar-w: 240px; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .detail-grid { grid-template-columns: 1fr; }
+  .landing-nav .nav-links { display: none; }
+}
+
+/* Tablet & mobile: collapse sidebar */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed; top: 0; left: 0; z-index: 60;
+    transform: translateX(-100%);
+    box-shadow: 10px 0 40px rgba(0,0,0,.2);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 55; opacity: 0; pointer-events: none; transition: opacity var(--transition); }
+  .sidebar-backdrop.open { opacity: 1; pointer-events: auto; }
+  .menu-toggle { display: grid; }
+
+  .content { padding: 18px; }
+  .topbar { padding: 0 16px; }
+  .topbar .search { display: none; }
+  .page-head h2 { font-size: 1.3rem; }
+
+  /* Switch table to mobile cards */
+  .table-wrap { display: none; }
+  .mobile-cards { display: flex; }
+
+  .form-grid, .form-grid-3 { grid-template-columns: 1fr; }
+  .stats-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .stat-card .meta strong { font-size: 1.4rem; }
+
+  .modal { max-width: 100%; padding: 20px; border-radius: var(--radius); }
+  .drawer { max-width: 100%; }
+
+  .hero { padding: 50px 20px 70px; }
+  .feature-grid { grid-template-columns: 1fr; padding: 40px 20px; }
+  .landing-nav { padding: 12px 18px; }
+  .brand-text strong { font-size: .9rem; }
+  .brand-text span { font-size: .62rem; }
+
+  .user-chip .meta { display: none; }
+  .user-chip { padding: 4px; }
+}
+
+@media (max-width: 560px) {
+  .stats-grid { grid-template-columns: 1fr; }
+  .page-head { flex-direction: column; align-items: flex-start; }
+  .page-head-actions { width: 100%; }
+  .page-head-actions .btn { flex: 1; }
+  .panel { padding: 16px; }
+  .detail-hero { flex-direction: column; text-align: center; }
+  .detail-hero .photo-lg { margin: 0 auto; }
+  .role-pills { gap: 6px; }
+  .role-pill { font-size: .72rem; padding: 6px 11px; }
+  .login-card { padding: 26px 22px; }
+  .topbar-actions .icon-btn:not(.always) { display: none; }
+  .tabs { gap: 0; }
+  .tab { padding: 10px 12px; font-size: .82rem; }
+  .bar-chart { height: 140px; }
+  .bar-chart .bar-val { font-size: .66rem; }
+  .modal-foot { flex-direction: column-reverse; }
+  .modal-foot .btn { width: 100%; }
+}
+
+/* Print */
+@media print {
+  .sidebar, .topbar, .page-head-actions, .row-actions, .toolbar, .pagination, .demo-banner, .bg-animated, .bg-shapes, .ecg-line { display: none !important; }
+  .main { width: 100%; }
+  .content { padding: 0; }
+  body { background: #fff; color: #000; }
+  .glass, .panel { background: #fff; box-shadow: none; border: 1px solid #ddd; backdrop-filter: none; }
+  .mobile-cards { display: none; }
+  .table-wrap { display: block; overflow: visible; }
+}
