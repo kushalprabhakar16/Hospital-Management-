@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="royal" data-mode="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard · Kushal Multi Speciality Hospital</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/responsive.css">
+</head>
+<body>
+  <script src="js/api.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (async function() {
+      await initApp();
+      if (!Auth.requireAuth()) return;
+      mountShell('dashboard', 'Dashboard', renderDashboard);
+    })();
+
+    function renderDashboard(root) {
+      const db = DB.get();
+      const today = new Date().toISOString().slice(0, 10);
+      const todayAppts = db.appointments.filter(a => a.date === today).length;
+      const todayOps = db.operations.filter(o => o.date === today).length;
+      const emergency = db.patients.filter(p => p.status === 'Critical').length;
+      const lowStock = db.medicines.filter(m => m.stock < 100).length;
+      const revenue = db.billing.reduce((s, b) => s + (b.paid || 0), 0);
+      const nurses = db.staff.filter(s => s.role === 'Nurse').length;
+      const labTests = db.labTests.length;
+
+      root.innerHTML = `
+        <div class="stats-grid" id="statsGrid"></div>
+        <div class="chart-grid">
+          <div class="chart-box glass">
+            <h4><i class="fa-solid fa-chart-column" style="color:var(--c-primary)"></i> Patient Admissions (Last 7 days)</h4>
+            <div class="bar-chart" id="barChart"></div>
+          </div>
+          <div class="chart-box glass">
+            <h4><i class="fa-solid fa-chart-pie" style="color:var(--c-primary)"></i> Patients by Status</h4>
+            <div class="donut" id="donut"></div>
+            <div class="legend" id="donutLegend"></div>
+          </div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div class="panel glass">
+            <div class="panel-head"><h3><i class="fa-solid fa-user-injured"></i> Recent Patients</h3><a href="patients.html" class="btn btn-sm btn-ghost">View All</a></div>
+            <div id="recentPatients"></div>
+          </div>
+          <div class="panel glass">
+            <div class="panel-head"><h3><i class="fa-solid fa-user-doctor"></i> Recent Doctors</h3><a href="doctors.html" class="btn btn-sm btn-ghost">View All</a></div>
+            <div id="recentDoctors"></div>
+          </div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div class="panel glass">
+            <div class="panel-head"><h3><i class="fa-solid fa-calendar-check"></i> Today's Appointments</h3></div>
+            <div id="todayAppts"></div>
+          </div>
+          <div class="panel glass">
+            <div class="panel-head"><h3><i class="fa-solid fa-bell"></i> Alerts & Notifications</h3></div>
+            <div id="alerts"></div>
+          </div>
+        </div>
+        <div class="panel glass">
+          <div class="panel-head"><h3><i class="fa-solid fa-building"></i> Hospital Modules</h3></div>
+          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))" id="moduleCards"></div>
+        </div>
+      `;
+
+      // Stats
+      const stats = [
+        { ico: 'user-injured', cls: 'ico-blue', val: db.patients.length, label: 'Total Patients', trend: '+12%' },
+        { ico: 'user-doctor', cls: 'ico-green', val: db.doctors.length, label: 'Total Doctors', trend: '+5%' },
+        { ico: 'user-nurse', cls: 'ico-pink', val: nurses, label: 'Nurses', trend: '+2%' },
+        { ico: 'users-gear', cls: 'ico-indigo', val: db.staff.length, label: 'Staff', trend: '+8%' },
+        { ico: 'building', cls: 'ico-teal', val: db.departments.length, label: 'Departments', trend: '0%' },
+        { ico: 'calendar-check', cls: 'ico-blue', val: todayAppts, label: "Today's Appointments", trend: '+15%' },
+        { ico: 'syringe', cls: 'ico-purple', val: todayOps, label: "Today's Operations", trend: '+3%' },
+        { ico: 'bed-pulse', cls: 'ico-amber', val: 180, label: 'Available Beds', trend: 'Live' },
+        { ico: 'heart-pulse', cls: 'ico-red', val: 24, label: 'ICU Beds', trend: 'Live' },
+        { ico: 'truck-medical', cls: 'ico-red', val: emergency, label: 'Emergency Cases', trend: '!' },
+        { ico: 'flask', cls: 'ico-teal', val: labTests, label: 'Laboratory Tests', trend: '+7%' },
+        { ico: 'prescription-bottle-medical', cls: 'ico-pink', val: db.medicines.length, label: 'Pharmacy Stock', trend: lowStock + ' low' },
+        { ico: 'indian-rupee-sign', cls: 'ico-green', val: '₹' + (revenue / 1000).toFixed(1) + 'k', label: "Today's Revenue", trend: '+22%' },
+      ];
+      $('#statsGrid').innerHTML = stats.map(s => `
+        <div class="stat-card glass">
+          <div class="ico ${s.cls}"><i class="fa-solid fa-${s.ico}"></i></div>
+          <div class="meta"><strong>${s.val}</strong><span>${s.label}</span></div>
+          <div class="trend" style="color:${s.trend.startsWith('+') ? 'var(--c-success)' : s.trend === '!' ? 'var(--c-error)' : 'var(--text-muted)'}">${s.trend}</div>
+        </div>`).join('');
+
+      // Bar chart
+      const days = [...Array(7)].map((_, i) => {
+        const d = new Date(); d.setDate(d.getDate() - (6 - i));
+        return { label: d.toLocaleDateString('en', { weekday: 'short' }), val: Math.floor(Math.random() * 15) + 3 };
+      });
+      const maxV = Math.max(...days.map(d => d.val));
+      $('#barChart').innerHTML = days.map(d => `
+        <div class="bar-col">
+          <div class="bar" style="height:${(d.val / maxV) * 100}%">
+            <span class="bar-val">${d.val}</span>
+          </div>
+          <div class="bar-label">${d.label}</div>
+        </div>`).join('');
+
+      // Donut
+      const statuses = ['Admitted', 'Critical', 'Outpatient', 'Discharged'];
+      const colors = ['#2563eb', '#dc2626', '#f59e0b', '#16a34a'];
+      const counts = statuses.map(s => db.patients.filter(p => p.status === s).length);
+      const total = counts.reduce((a, b) => a + b, 0) || 1;
+      let acc = 0;
+      const circ = 2 * Math.PI * 70;
+      const segs = counts.map((c, i) => {
+        const frac = c / total; const dash = frac * circ;
+        const seg = `<circle cx="90" cy="90" r="70" fill="none" stroke="${colors[i]}" stroke-width="22" stroke-dasharray="${dash} ${circ - dash}" stroke-dashoffset="${-acc}"/>`;
+        acc += dash; return seg;
+      }).join('');
+      $('#donut').innerHTML = `<svg width="180" height="180"><circle cx="90" cy="90" r="70" fill="none" stroke="rgba(100,116,139,.15)" stroke-width="22"/>${segs}</svg>
+        <div class="center"><strong>${db.patients.length}</strong><span>Total Patients</span></div>`;
+      $('#donutLegend').innerHTML = statuses.map((s, i) => `
+        <div class="legend-item"><span class="legend-dot" style="background:${colors[i]}"></span> ${s} <strong style="margin-left:auto">${counts[i]}</strong></div>`).join('');
+
+      // Recent patients
+      $('#recentPatients').innerHTML = db.patients.slice(-4).reverse().map(p => `
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(100,116,139,.1)">
+          ${avatarHTML(p)}<div style="flex:1"><strong style="font-size:.9rem">${esc(p.name)}</strong><div class="cell-sub">${p.patientId} · ${p.department}</div></div>
+          <span class="badge ${p.status === 'Critical' ? 'badge-error' : p.status === 'Admitted' ? 'badge-info' : p.status === 'Discharged' ? 'badge-success' : 'badge-neutral'}">${p.status}</span>
+        </div>`).join('') || '<p class="text-muted">No patients yet</p>';
+
+      // Recent doctors
+      $('#recentDoctors').innerHTML = db.doctors.slice(-4).reverse().map(d => `
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(100,116,139,.1)">
+          ${avatarHTML(d)}<div style="flex:1"><strong style="font-size:.9rem">${esc(d.name)}</strong><div class="cell-sub">${d.specialization} · ${d.experience} yrs</div></div>
+          <span class="badge badge-success">${d.status}</span>
+        </div>`).join('');
+
+      // Today's appointments
+      const tAppts = db.appointments.filter(a => a.date === today);
+      $('#todayAppts').innerHTML = (tAppts.length ? tAppts : db.appointments.slice(0, 4)).map(a => `
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(100,116,139,.1)">
+          <div style="width:42px;height:42px;border-radius:12px;background:var(--surface-2);display:grid;place-items:center;color:var(--c-primary)"><i class="fa-solid fa-clock"></i></div>
+          <div style="flex:1"><strong style="font-size:.9rem">${esc(a.patientName)}</strong><div class="cell-sub">${a.doctorName} · ${a.department}</div></div>
+          <span class="badge ${a.status === 'Confirmed' ? 'badge-success' : 'badge-warning'}">${a.time} · ${a.status}</span>
+        </div>`).join('') || '<p class="text-muted">No appointments today</p>';
+
+      // Alerts
+      $('#alerts').innerHTML = db.notifications.map(n => `
+        <div class="alert alert-${n.type === 'error' ? 'error' : n.type === 'warning' ? 'warning' : 'info'}">
+          <i class="fa-solid fa-${n.type === 'error' ? 'triangle-exclamation' : n.type === 'warning' ? 'circle-exclamation' : 'circle-info'}"></i>
+          <div style="flex:1"><strong>${esc(n.title)}</strong><div class="cell-sub">${n.time}</div></div>
+        </div>`).join('');
+
+      // Module cards
+      const modules = [
+        { icon: 'calendar-check', label: 'Appointments', tab: 'appointments', color: 'ico-blue' },
+        { icon: 'syringe', label: 'Operations', tab: 'operations', color: 'ico-purple' },
+        { icon: 'flask', label: 'Laboratory', tab: 'laboratory', color: 'ico-teal' },
+        { icon: 'prescription-bottle-medical', label: 'Pharmacy', tab: 'pharmacy', color: 'ico-pink' },
+        { icon: 'file-invoice-dollar', label: 'Billing', tab: 'billing', color: 'ico-indigo' },
+        { icon: 'users-gear', label: 'Staff', tab: 'staff', color: 'ico-amber' },
+        { icon: 'chart-pie', label: 'Reports', tab: 'reports', color: 'ico-green' },
+        { icon: 'building', label: 'Departments', tab: 'departments', color: 'ico-teal' },
+      ];
+      $('#moduleCards').innerHTML = modules.map(m => `
+        <button class="feature-card glass" style="cursor:pointer;text-align:center;border:none;width:100%" onclick="openModule('${m.tab}','${m.label}')">
+          <div class="ico ${m.color}" style="margin:0 auto 10px"><i class="fa-solid fa-${m.icon}"></i></div>
+          <strong style="font-size:.92rem">${m.label}</strong>
+        </button>`).join('');
+    }
+
+    /* ----------  Module modal launcher  ---------- */
+    window.openModule = function(tab, label) {
+      const body = `<div class="tabs" id="modTabs"></div><div id="modContent"></div>`;
+      openModal(`<i class="fa-solid fa-layer-group"></i> ${label}`, body, { size: 'xl' });
+      renderModule(tab);
+    };
+
+    window.renderModule = function(tab) {
+      const tabMap = {
+        appointments: { label: 'Appointments', render: renderAppointments },
+        operations: { label: 'Operations', render: renderOperations },
+        laboratory: { label: 'Laboratory', render: renderLab },
+        pharmacy: { label: 'Pharmacy', render: renderPharmacy },
+        billing: { label: 'Billing', render: renderBilling },
+        staff: { label: 'Staff', render: renderStaff },
+        reports: { label: 'Reports', render: renderReports },
+        departments: { label: 'Departments', render: renderDepartments },
+      };
+      const t = tabMap[tab]; if (!t) return;
+      t.render($('#modContent'));
+    };
+
+    /* ----------  Appointments  ---------- */
+    function renderAppointments(c) {
+      const db = DB.get();
+      c.innerHTML = `
+        <div class="panel-head">
+          <h3><i class="fa-solid fa-calendar-check"></i> Appointments</h3>
+          <div class="panel-head-actions">
+            <button class="btn btn-sm" onclick="openApptForm()"><i class="fa-solid fa-plus"></i> Book Appointment</button>
+            <button class="btn btn-sm btn-ghost" onclick="printPage()"><i class="fa-solid fa-print"></i></button>
+          </div>
+        </div>
+        <div class="toolbar">
+          <div class="search-box"><i class="fa-solid fa-magnifying-glass"></i><input class="input" id="apptSearch" placeholder="Search appointments..."></div>
+          <select class="select" id="apptStatus"><option value="">All Status</option><option>Pending</option><option>Confirmed</option><option>Cancelled</option><option>Completed</option></select>
+        </div>
+        <div id="apptList"></div>
+      `;
+      const draw = () => {
+        const q = ($('#apptSearch').value || '').toLowerCase();
+        const st = $('#apptStatus').value;
+        let rows = db.appointments.filter(a =>
+          (!q || a.patientName.toLowerCase().includes(q) || a.doctorName.toLowerCase().includes(q)) &&
+          (!st || a.status === st));
+        $('#apptList').innerHTML = renderTable({
+          columns: [
+            { label: 'Appointment ID', key: 'apptId' },
+            { label: 'Patient', key: 'patientName' },
+            { label: 'Doctor', key: 'doctorName' },
+            { label: 'Department', key: 'department' },
+            { label: 'Date', key: 'date', render: r => fmtDate(r.date) },
+            { label: 'Time', key: 'time' },
+            { label: 'Type', key: 'type' },
+            { label: 'Status', key: 'status', render: r => `<span class="badge ${r.status === 'Confirmed' ? 'badge-success' : r.status === 'Cancelled' ? 'badge-error' : r.status === 'Completed' ? 'badge-info' : 'badge-warning'}">${r.status}</span>` },
+          ],
+          rows, empty: 'No appointments found',
+          actions: r => `
+            <button class="btn-icon edit" title="Edit" onclick="openApptForm(${r.id})"><i class="fa-solid fa-pen"></i></button>
+            ${r.status !== 'Cancelled' ? `<button class="btn-icon" title="Cancel" onclick="cancelAppt(${r.id})" style="color:var(--c-error)"><i class="fa-solid fa-ban"></i></button>` : ''}
+            <button class="btn-icon del" title="Delete" onclick="delAppt(${r.id})"><i class="fa-solid fa-trash"></i></button>
+          `
+        });
+      };
+      draw();
+      $('#apptSearch').addEventListener('input', draw);
+      $('#apptStatus').addEventListener('change', draw);
+    }
+
+    window.openApptForm = function(id) {
+      const db = DB.get();
+      const a = id ? DB.find('appointments', id) : {};
+      const patOpts = db.patients.map(p => `<option value="${p.patientId}" ${a.patientId === p.patientId ? 'selected' : ''}>${esc(p.name)} (${p.patientId})</option>`).join('');
+      const docOpts = db.doctors.map(d => `<option value="${d.doctorId}" ${a.doctorId === d.doctorId ? 'selected' : ''}>${esc(d.name)} (${d.specialization})</option>`).join('');
+      openModal(`<i class="fa-solid fa-calendar-plus"></i> ${id ? 'Edit' : 'Book'} Appointment`,
+        `<form id="apptForm">
+          <div class="form-grid">
+            <div class="field"><label>Patient</label><select class="select" id="apPat" required><option value="">Select patient</option>${patOpts}</select></div>
+            <div class="field"><label>Doctor</label><select class="select" id="apDoc" required><option value="">Select doctor</option>${docOpts}</select></div>
+            <div class="field"><label>Date</label><input class="input" type="date" id="apDate" value="${a.date || new Date().toISOString().slice(0,10)}" required></div>
+            <div class="field"><label>Time</label><input class="input" type="time" id="apTime" value="${a.time || '09:00'}" required></div>
+            <div class="field"><label>Type</label><select class="select" id="apType"><option ${a.type === 'New' ? 'selected' : ''}>New</option><option ${a.type === 'Follow-up' ? 'selected' : ''}>Follow-up</option><option ${a.type === 'Emergency' ? 'selected' : ''}>Emergency</option></select></div>
+            <div class="field"><label>Status</label><select class="select" id="apStat"><option ${a.status === 'Pending' ? 'selected' : ''}>Pending</option><option ${a.status === 'Confirmed' ? 'selected' : ''}>Confirmed</option><option ${a.status === 'Completed' ? 'selected' : ''}>Completed</option><option ${a.status === 'Cancelled' ? 'selected' : ''}>Cancelled</option></select></div>
+            <div class="field" style="grid-column:1/-1"><label>Notes</label><textarea class="textarea" id="apNotes">${esc(a.notes || '')}</textarea></div>
+          </div>
+        </form>`,
+        { footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveAppt(${id || 0})"><i class="fa-solid fa-save"></i> Save</button>` });
+    };
+    window.saveAppt = function(id) {
+      const db = DB.get();
+      const pat = db.patients.find(p => p.patientId === $('#apPat').value);
+      const doc = db.doctors.find(d => d.doctorId === $('#apDoc').value);
+      if (!pat || !doc) { showToast('Select patient and doctor', 'error'); return; }
+      const data = {
+        patientId: pat.patientId, patientName: pat.name, doctorId: doc.doctorId, doctorName: doc.name,
+        department: doc.department, date: $('#apDate').value, time: $('#apTime').value,
+        type: $('#apType').value, status: $('#apStat').value, notes: $('#apNotes').value,
+      };
+      if (id) { DB.put('appointments', id, data); showToast('Appointment updated'); }
+      else {
+        const n = DB.nextCounter('appointments');
+        DB.add('appointments', { id: Date.now(), apptId: `KMSH-A-${String(n).padStart(6,'0')}`, ...data, created_at: new Date().toISOString() });
+        showToast('Appointment booked');
+      }
+      closeModal(); renderModule('appointments');
+    };
+    window.cancelAppt = function(id) { DB.put('appointments', id, { status: 'Cancelled' }); showToast('Appointment cancelled', 'info'); renderModule('appointments'); };
+    window.delAppt = function(id) { confirmDialog('Delete Appointment', 'Remove this appointment record?', () => { DB.remove('appointments', id); showToast('Deleted'); renderModule('appointments'); }); };
+
+    /* ----------  Operations  ---------- */
+    function renderOperations(c) {
+      const db = DB.get();
+      c.innerHTML = `
+        <div class="panel-head"><h3><i class="fa-solid fa-syringe"></i> Operations</h3>
+          <div class="panel-head-actions"><button class="btn btn-sm" onclick="openOpForm()"><i class="fa-solid fa-plus"></i> Schedule Surgery</button></div>
+        </div>
+        <div class="toolbar"><div class="search-box"><i class="fa-solid fa-magnifying-glass"></i><input class="input" id="opSearch" placeholder="Search surgeries..."></div></div>
+        <div id="opList"></div>`;
+      const draw = () => {
+        const q = $('#opSearch').value.toLowerCase();
+        const rows = db.operations.filter(o => !q || o.patientName.toLowerCase().includes(q) || o.leadDoctor.toLowerCase().includes(q) || o.type.toLowerCase().includes(q));
+        $('#opList').innerHTML = renderTable({
+          columns: [
+            { label: 'Surgery ID', key: 'surgeryId' },
+            { label: 'Patient', key: 'patientName' },
+            { label: 'Lead Doctor', key: 'leadDoctor' },
+            { label: 'Department', key: 'department' },
+            { label: 'Theatre', key: 'theatre' },
+            { label: 'Type', key: 'type' },
+            { label: 'Date', key: 'date', render: r => fmtDate(r.date) },
+            { label: 'Cost', key: 'cost', render: r => fmtMoney(r.cost) },
+            { label: 'Status', key: 'status', render: r => `<span class="badge ${r.status === 'Completed' ? 'badge-success' : r.status === 'In Progress' ? 'badge-warning' : 'badge-info'}">${r.status}</span>` },
+          ], rows, empty: 'No surgeries scheduled',
+          actions: r => `<button class="btn-icon edit" onclick="openOpForm(${r.id})"><i class="fa-solid fa-pen"></i></button><button class="btn-icon del" onclick="delOp(${r.id})"><i class="fa-solid fa-trash"></i></button>`
+        });
+      };
+      draw(); $('#opSearch').addEventListener('input', draw);
+    }
+    window.openOpForm = function(id) {
+      const db = DB.get(); const o = id ? DB.find('operations', id) : {};
+      const patOpts = db.patients.map(p => `<option ${o.patientName === p.name ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+      const docOpts = db.doctors.map(d => `<option ${o.leadDoctor === d.name ? 'selected' : ''}>${esc(d.name)}</option>`).join('');
+      openModal(`<i class="fa-solid fa-syringe"></i> ${id ? 'Edit' : 'Schedule'} Surgery`,
+        `<form id="opForm"><div class="form-grid">
+          <div class="field"><label>Patient</label><select class="select" id="opPat" required>${patOpts}</select></div>
+          <div class="field"><label>Lead Doctor</label><select class="select" id="opLead" required>${docOpts}</select></div>
+          <div class="field"><label>Surgery Type</label><input class="input" id="opType" value="${esc(o.type || '')}" placeholder="e.g. CABG" required></div>
+          <div class="field"><label>Department</label><select class="select" id="opDept">${DB.DEPARTMENTS.map(d => `<option ${o.department === d ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
+          <div class="field"><label>Operation Theatre</label><input class="input" id="opTheatre" value="${esc(o.theatre || 'OT-1')}" required></div>
+          <div class="field"><label>Supporting Doctors</label><input class="input" id="opSupport" value="${esc(o.supporting || '')}"></div>
+          <div class="field"><label>Date</label><input class="input" type="date" id="opDate" value="${o.date || new Date().toISOString().slice(0,10)}" required></div>
+          <div class="field"><label>Time</label><input class="input" type="time" id="opTime" value="${o.time || '10:00'}" required></div>
+          <div class="field"><label>Cost (₹)</label><input class="input" type="number" id="opCost" value="${o.cost || 50000}" required></div>
+          <div class="field"><label>Status</label><select class="select" id="opStat"><option ${o.status === 'Scheduled' ? 'selected' : ''}>Scheduled</option><option ${o.status === 'In Progress' ? 'selected' : ''}>In Progress</option><option ${o.status === 'Completed' ? 'selected' : ''}>Completed</option><option ${o.status === 'Cancelled' ? 'selected' : ''}>Cancelled</option></select></div>
+          <div class="field" style="grid-column:1/-1"><label>Notes</label><textarea class="textarea" id="opNotes">${esc(o.notes || '')}</textarea></div>
+        </div></form>`,
+        { footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveOp(${id || 0})"><i class="fa-solid fa-save"></i> Save</button>` });
+    };
+    window.saveOp = function(id) {
+      const data = {
+        patientName: $('#opPat').value, leadDoctor: $('#opLead').value, type: $('#opType').value,
+        department: $('#opDept').value, theatre: $('#opTheatre').value, supporting: $('#opSupport').value,
+        date: $('#opDate').value, time: $('#opTime').value, cost: +$('#opCost').value, status: $('#opStat').value, notes: $('#opNotes').value,
+      };
+      if (id) { DB.put('operations', id, data); showToast('Surgery updated'); }
+      else { const n = DB.nextCounter('operations'); DB.add('operations', { id: Date.now(), surgeryId: `KMSH-S-${String(n).padStart(6,'0')}`, ...data, created_at: new Date().toISOString() }); showToast('Surgery scheduled'); }
+      closeModal(); renderModule('operations');
+    };
+    window.delOp = function(id) { confirmDialog('Delete Surgery', 'Remove this surgery record?', () => { DB.remove('operations', id); showToast('Deleted'); renderModule('operations'); }); };
+
+    /* ----------  Laboratory  ---------- */
+    function renderLab(c) {
+      const db = DB.get();
+      c.innerHTML = `
+        <div class="panel-head"><h3><i class="fa-solid fa-flask"></i> Laboratory</h3>
+          <div class="panel-head-actions"><button class="btn btn-sm" onclick="openLabForm()"><i class="fa-solid fa-plus"></i> New Test</button></div>
+        </div>
+        <div class="toolbar"><div class="search-box"><i class="fa-solid fa-magnifying-glass"></i><input class="input" id="labSearch" placeholder="Search tests..."></div>
+          <select class="select" id="labCat"><option value="">All Categories</option><option>Pathology</option><option>Cardiology</option><option>Radiology</option></select>
+        </div>
+        <div id="labList"></div>`;
+      const draw = () => {
+        const q = $('#labSearch').value.toLowerCase(); const cat = $('#labCat').value;
+        const rows = db.labTests.filter(t => (!q || t.patientName.toLowerCase().includes(q) || t.test.toLowerCase().includes(q)) && (!cat || t.category === cat));
+        $('#labList').innerHTML = renderTable({
+          columns: [
+            { label: 'Test ID', key: 'testId' },
+            { label: 'Test', key: 'test' },
+            { label: 'Patient', key: 'patientName' },
+            { label: 'Category', key: 'category' },
+            { label: 'Date', key: 'date', render: r => fmtDate(r.date) },
+            { label: 'Price', key: 'price', render: r => fmtMoney(r.price) },
+            { label: 'Status', key: 'status', render: r => `<span class="badge ${r.status === 'Completed' ? 'badge-success' : r.status === 'In Progress' ? 'badge-warning' : 'badge-info'}">${r.status}</span>` },
+          ], rows, empty: 'No lab tests',
+          actions: r => `<button class="btn-icon edit" onclick="openLabForm(${r.id})"><i class="fa-solid fa-pen"></i></button><button class="btn-icon del" onclick="delLab(${r.id})"><i class="fa-solid fa-trash"></i></button>`
+        });
+      };
+      draw(); $('#labSearch').addEventListener('input', draw); $('#labCat').addEventListener('change', draw);
+    }
+    window.openLabForm = function(id) {
+      const db = DB.get(); const t = id ? DB.find('labTests', id) : {};
+      const patOpts = db.patients.map(p => `<option ${t.patientName === p.name ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+      openModal(`<i class="fa-solid fa-flask"></i> ${id ? 'Edit' : 'New'} Lab Test`,
+        `<form><div class="form-grid">
+          <div class="field"><label>Test Name</label><select class="select" id="lbTest"><option ${t.test === 'Complete Blood Count' ? 'selected' : ''}>Complete Blood Count</option><option ${t.test === 'ECG' ? 'selected' : ''}>ECG</option><option ${t.test === 'X-Ray Chest' ? 'selected' : ''}>X-Ray Chest</option><option ${t.test === 'MRI Brain' ? 'selected' : ''}>MRI Brain</option><option ${t.test === 'CT Scan' ? 'selected' : ''}>CT Scan</option><option ${t.test === 'Ultrasound' ? 'selected' : ''}>Ultrasound</option><option ${t.test === 'Pathology' ? 'selected' : ''}>Pathology</option></select></div>
+          <div class="field"><label>Patient</label><select class="select" id="lbPat">${patOpts}</select></div>
+          <div class="field"><label>Category</label><select class="select" id="lbCat"><option ${t.category === 'Pathology' ? 'selected' : ''}>Pathology</option><option ${t.category === 'Cardiology' ? 'selected' : ''}>Cardiology</option><option ${t.category === 'Radiology' ? 'selected' : ''}>Radiology</option></select></div>
+          <div class="field"><label>Price (₹)</label><input class="input" type="number" id="lbPrice" value="${t.price || 500}" required></div>
+          <div class="field"><label>Date</label><input class="input" type="date" id="lbDate" value="${t.date || new Date().toISOString().slice(0,10)}" required></div>
+          <div class="field"><label>Status</label><select class="select" id="lbStat"><option ${t.status === 'Pending' ? 'selected' : ''}>Pending</option><option ${t.status === 'In Progress' ? 'selected' : ''}>In Progress</option><option ${t.status === 'Completed' ? 'selected' : ''}>Completed</option></select></div>
+          <div class="field" style="grid-column:1/-1"><label>Upload Report</label><input class="input" type="file" accept="image/*,application/pdf"></div>
+        </div></form>`,
+        { footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveLab(${id || 0})"><i class="fa-solid fa-save"></i> Save</button>` });
+    };
+    window.saveLab = function(id) {
+      const data = { test: $('#lbTest').value, patientName: $('#lbPat').value, category: $('#lbCat').value, price: +$('#lbPrice').value, date: $('#lbDate').value, status: $('#lbStat').value };
+      if (id) { DB.put('labTests', id, data); showToast('Test updated'); }
+      else { const n = DB.nextCounter('lab'); DB.add('labTests', { id: Date.now(), testId: `KMSH-L-${String(n).padStart(6,'0')}`, ...data, created_at: new Date().toISOString() }); showToast('Test added'); }
+      closeModal(); renderModule('laboratory');
+    };
+    window.delLab = function(id) { confirmDialog('Delete Test', 'Remove this lab test?', () => { DB.remove('labTests', id); showToast('Deleted'); renderModule('laboratory'); }); };
+
+    /* ----------  Pharmacy  ---------- */
+    function renderPharmacy(c) {
+      const db = DB.get();
+      c.innerHTML = `
+        <div class="panel-head"><h3><i class="fa-solid fa-prescription-bottle-medical"></i> Pharmacy</h3>
+          <div class="panel-head-actions"><button class="btn btn-sm" onclick="openMedForm()"><i class="fa-solid fa-plus"></i> Add Medicine</button></div>
+        </div>
+        <div class="toolbar"><div class="search-box"><i class="fa-solid fa-magnifying-glass"></i><input class="input" id="medSearch" placeholder="Search medicines..."></div></div>
+        <div id="medList"></div>`;
+      const draw = () => {
+        const q = $('#medSearch').value.toLowerCase();
+        const rows = db.medicines.filter(m => !q || m.name.toLowerCase().includes(q) || m.supplier.toLowerCase().includes(q));
+        $('#medList').innerHTML = renderTable({
+          columns: [
+            { label: 'Medicine ID', key: 'medId' },
+            { label: 'Name', key: 'name' },
+            { label: 'Stock', key: 'stock', render: r => `<span class="badge ${r.stock < 100 ? 'badge-error' : 'badge-success'}">${r.stock} units</span>` },
+            { label: 'Supplier', key: 'supplier' },
+            { label: 'Batch', key: 'batch' },
+            { label: 'Price', key: 'price', render: r => fmtMoney(r.price) },
+            { label: 'Expiry', key: 'expiry', render: r => fmtDate(r.expiry) },
+            { label: 'Status', key: 'status', render: r => `<span class="badge ${r.status === 'Low Stock' ? 'badge-error' : 'badge-success'}">${r.status}</span>` },
+          ], rows, empty: 'No medicines',
+          actions: r => `<button class="btn-icon edit" onclick="openMedForm(${r.id})"><i class="fa-solid fa-pen"></i></button><button class="btn-icon del" onclick="delMed(${r.id})"><i class="fa-solid fa-trash"></i></button>`
+        });
+      };
+      draw(); $('#medSearch').addEventListener('input', draw);
+    }
+    window.openMedForm = function(id) {
+      const m = id ? DB.find('medicines', id) : {};
+      openModal(`<i class="fa-solid fa-prescription-bottle-medical"></i> ${id ? 'Edit' : 'Add'} Medicine`,
+        `<form><div class="form-grid">
+          <div class="field"><label>Name</label><input class="input" id="mdName" value="${esc(m.name || '')}" required></div>
+          <div class="field"><label>Stock</label><input class="input" type="number" id="mdStock" value="${m.stock || 100}" required></div>
+          <div class="field"><label>Supplier</label><input class="input" id="mdSup" value="${esc(m.supplier || '')}"></div>
+          <div class="field"><label>Batch</label><input class="input" id="mdBatch" value="${esc(m.batch || '')}"></div>
+          <div class="field"><label>Price (₹)</label><input class="input" type="number" id="mdPrice" value="${m.price || 10}" required></div>
+          <div class="field"><label>Expiry</label><input class="input" type="date" id="mdExp" value="${m.expiry || '2025-12-31'}" required></div>
+        </div></form>`,
+        { footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveMed(${id || 0})"><i class="fa-solid fa-save"></i> Save</button>` });
+    };
+    window.saveMed = function(id) {
+      const stock = +$('#mdStock').value;
+      const data = { name: $('#mdName').value, stock, supplier: $('#mdSup').value, batch: $('#mdBatch').value, price: +$('#mdPrice').value, expiry: $('#mdExp').value, status: stock < 100 ? 'Low Stock' : 'In Stock' };
+      if (id) { DB.put('medicines', id, data); showToast('Medicine updated'); }
+      else { const n = DB.get().medicines.length + 1; DB.add('medicines', { id: Date.now(), medId: `KMSH-M-${String(n).padStart(4,'0')}`, ...data, created_at: new Date().toISOString() }); showToast('Medicine added'); }
+      closeModal(); renderModule('pharmacy');
+    };
+    window.delMed = function(id) { confirmDialog('Delete Medicine', 'Remove this medicine?', () => { DB.remove('medicines', id); showToast('Deleted'); renderModule('pharmacy'); }); };
+
+    /* ----------  Billing  ---------- */
+    function renderBilling(c) {
+      const db = DB.get();
+      c.innerHTML = `
+        <div class="panel-head"><h3><i class="fa-solid fa-file-invoice-dollar"></i> Billing</h3>
+          <div class="panel-head-actions"><button class="btn btn-sm" onclick="openBillForm()"><i class="fa-solid fa-plus"></i> New Invoice</button></div>
+        </div>
+        <div class="toolbar"><div class="search-box"><i class="fa-solid fa-magnifying-glass"></i><input class="input" id="billSearch" placeholder="Search invoices..."></div></div>
+        <div id="billList"></div>`;
+      const draw = () => {
+        const q = $('#billSearch').value.toLowerCase();
+        const rows = db.billing.filter(b => !q || b.patientName.toLowerCase().includes(q) || b.invoiceId.toLowerCase().includes(q));
+        $('#billList').innerHTML = renderTable({
+          columns: [
+            { label: 'Invoice ID', key: 'invoiceId' },
+            { label: 'Patient', key: 'patientName' },
+            { label: 'Doctor', key: 'doctor' },
+            { label: 'Date', key: 'date', render: r => fmtDate(r.date) },
+            { label: 'Total', key: 'total', render: r => fmtMoney(r.total) },
+            { label: 'Paid', key: 'paid', render: r => fmtMoney(r.paid) },
+            { label: 'Balance', key: 'balance', render: r => fmtMoney(r.balance) },
+            { label: 'Status', key: 'status', render: r => `<span class="badge ${r.status === 'Paid' ? 'badge-success' : 'badge-warning'}">${r.status}</span>` },
+          ], rows, empty: 'No invoices',
+          actions: r => `<button class="btn-icon view" onclick="viewBill(${r.id})" title="View/Print"><i class="fa-solid fa-eye"></i></button><button class="btn-icon edit" onclick="openBillForm(${r.id})"><i class="fa-solid fa-pen"></i></button><button class="btn-icon del" onclick="delBill(${r.id})"><i class="fa-solid fa-trash"></i></button>`
+        });
+      };
+      draw(); $('#billSearch').addEventListener('input', draw);
+    }
+    window.openBillForm = function(id) {
+      const db = DB.get(); const b = id ? DB.find('billing', id) : {};
+      const patOpts = db.patients.map(p => `<option value="${p.patientId}" ${b.patientId === p.patientId ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+      openModal(`<i class="fa-solid fa-file-invoice-dollar"></i> ${id ? 'Edit' : 'New'} Invoice`,
+        `<form><div class="form-grid-3">
+          <div class="field"><label>Patient</label><select class="select" id="blPat" required>${patOpts}</select></div>
+          <div class="field"><label>Consultation (₹)</label><input class="input" type="number" id="blCons" value="${b.consultation || 500}"></div>
+          <div class="field"><label>Laboratory (₹)</label><input class="input" type="number" id="blLab" value="${b.lab || 0}"></div>
+          <div class="field"><label>Surgery (₹)</label><input class="input" type="number" id="blSurg" value="${b.surgery || 0}"></div>
+          <div class="field"><label>Pharmacy (₹)</label><input class="input" type="number" id="blPharm" value="${b.pharmacy || 0}"></div>
+          <div class="field"><label>Room Charges (₹)</label><input class="input" type="number" id="blRoom" value="${b.room || 0}"></div>
+          <div class="field"><label>Insurance (₹)</label><input class="input" type="number" id="blIns" value="${b.insurance || 0}"></div>
+          <div class="field"><label>Discount (₹)</label><input class="input" type="number" id="blDisc" value="${b.discount || 0}"></div>
+          <div class="field"><label>GST (%)</label><input class="input" type="number" id="blGst" value="${b.gst ? Math.round(b.gst / (b.total - b.gst) * 100) : 18}"></div>
+          <div class="field"><label>Paid (₹)</label><input class="input" type="number" id="blPaid" value="${b.paid || 0}"></div>
+        </div></form>`,
+        { footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveBill(${id || 0})"><i class="fa-solid fa-save"></i> Save</button>` });
+    };
+    window.saveBill = function(id) {
+      const db = DB.get(); const pat = db.patients.find(p => p.patientId === $('#blPat').value);
+      if (!pat) { showToast('Select patient', 'error'); return; }
+      const cons = +$('#blCons').value, lab = +$('#blLab').value, surg = +$('#blSurg').value, pharm = +$('#blPharm').value, room = +$('#blRoom').value;
+      const ins = +$('#blIns').value, disc = +$('#blDisc').value, gstPct = +$('#blGst').value, paid = +$('#blPaid').value;
+      const sub = cons + lab + surg + pharm + room - disc - ins;
+      const gst = Math.round(sub * gstPct / 100);
+      const total = sub + gst;
+      const balance = total - paid;
+      const data = { patientId: pat.patientId, patientName: pat.name, doctor: pat.doctor, consultation: cons, lab, surgery: surg, pharmacy: pharm, room, insurance: ins, discount: disc, gst, total, paid, balance, status: balance <= 0 ? 'Paid' : 'Partial', date: new Date().toISOString().slice(0,10) };
+      if (id) { DB.put('billing', id, data); showToast('Invoice updated'); }
+      else { const n = DB.nextCounter('billing'); DB.add('billing', { id: Date.now(), invoiceId: `KMSH-INV-${String(n).padStart(6,'0')}`, ...data, created_at: new Date().toISOString() }); showToast('Invoice created'); }
+      closeModal(); renderModule('billing');
+    };
+    window.viewBill = function(id) {
+      const b = DB.find('billing', id);
+      openModal(`<i class="fa-solid fa-receipt"></i> Invoice ${b.invoiceId}`,
+        `<div style="text-align:center;margin-bottom:18px"><div class="brand-logo lg" style="margin:0 auto 10px"><i class="fa-solid fa-heart-pulse"></i></div><strong style="font-size:1.2rem">KUSHAL MULTI SPECIALITY HOSPITAL</strong><p class="text-muted" style="font-size:.8rem">Invoice ${b.invoiceId} · ${fmtDate(b.date)}</p></div>
+        <div class="detail-grid">
+          <div class="detail-item"><span class="lbl">Patient</span><span class="val">${esc(b.patientName)}</span></div>
+          <div class="detail-item"><span class="lbl">Doctor</span><span class="val">${esc(b.doctor)}</span></div>
+        </div>
+        <table class="data-table" style="margin-top:14px"><tbody>
+          <tr><td>Consultation</td><td style="text-align:right">${fmtMoney(b.consultation)}</td></tr>
+          <tr><td>Laboratory</td><td style="text-align:right">${fmtMoney(b.lab)}</td></tr>
+          <tr><td>Surgery</td><td style="text-align:right">${fmtMoney(b.surgery)}</td></tr>
+          <tr><td>Pharmacy</td><td style="text-align:right">${fmtMoney(b.pharmacy)}</td></tr>
+          <tr><td>Room Charges</td><td style="text-align:right">${fmtMoney(b.room)}</td></tr>
+          <tr><td>Insurance</td><td style="text-align:right">- ${fmtMoney(b.insurance)}</td></tr>
+          <tr><td>Discount</td><td style="text-align:right">- ${fmtMoney(b.discount)}</td></tr>
+          <tr><td>GST</td><td style="text-align:right">${fmtMoney(b.gst)}</td></tr>
+          <tr style="font-weight:700;font-size:1.1rem"><td>Total</td><td style="text-align:right">${fmtMoney(b.total)}</td></tr>
+          <tr><td>Paid</td><td style="text-align:right;color:var(--c-success)">${fmtMoney(b.paid)}</td></tr>
+          <tr><td>Balance</td><td style="text-align:right;color:var(--c-error)">${fmtMoney(b.balance)}</td></tr>
+        </tbody></table>`,
+        { footer: `<button class="btn btn-ghost" onclick="closeModal()">Close</button><button class="btn" onclick="printPage()"><i class="fa-solid fa-print"></i> Print / PDF</button>` });
+    };
+    window.delBill = function(id) { confirmDialog('Delete Invoice', 'Remove this invoice?', () => { DB.remove('billing', id); showToast('Deleted'); renderModule('billing'); }); };
+
+    /* ----------  Staff  ---------- */
+    function renderStaff(c) {
+      const db = DB.get();
+      c.innerHTML = `
+        <div class="panel-head"><h3><i class="fa-solid fa-users-gear"></i> Staff</h3>
+          <div class="panel-head-actions"><button class="btn btn-sm" onclick="openStaffForm()"><i class="fa-solid fa-plus"></i> Add Staff</button></div>
+        </div>
+        <div class="toolbar"><div class="search-box"><i class="fa-solid fa-magnifying-glass"></i><input class="input" id="stSearch" placeholder="Search staff..."></div>
+          <select class="select" id="stRole"><option value="">All Roles</option>${DB.ROLES.filter(r => r !== 'Patient').map(r => `<option>${r}</option>`).join('')}</select>
+        </div>
+        <div id="stList"></div>`;
+      const draw = () => {
+        const q = $('#stSearch').value.toLowerCase(); const role = $('#stRole').value;
+        const rows = db.staff.filter(s => (!q || s.name.toLowerCase().includes(q)) && (!role || s.role === role));
+        $('#stList').innerHTML = renderTable({
+          columns: [
+            { label: 'Staff ID', key: 'staffId' },
+            { label: 'Name', key: 'name' },
+            { label: 'Role', key: 'role' },
+            { label: 'Department', key: 'department' },
+            { label: 'Phone', key: 'phone' },
+            { label: 'Shift', key: 'shift', render: r => `<span class="badge ${r.shift === 'Day' ? 'badge-info' : 'badge-pink'}">${r.shift}</span>` },
+            { label: 'Salary', key: 'salary', render: r => fmtMoney(r.salary) },
+            { label: 'Status', key: 'status', render: r => `<span class="badge badge-success">${r.status}</span>` },
+          ], rows, empty: 'No staff',
+          actions: r => `<button class="btn-icon edit" onclick="openStaffForm(${r.id})"><i class="fa-solid fa-pen"></i></button><button class="btn-icon del" onclick="delStaff(${r.id})"><i class="fa-solid fa-trash"></i></button>`
+        });
+      };
+      draw(); $('#stSearch').addEventListener('input', draw); $('#stRole').addEventListener('change', draw);
+    }
+    window.openStaffForm = function(id) {
+      const s = id ? DB.find('staff', id) : {};
+      openModal(`<i class="fa-solid fa-user-gear"></i> ${id ? 'Edit' : 'Add'} Staff`,
+        `<form><div class="form-grid">
+          <div class="field"><label>Name</label><input class="input" id="stName" value="${esc(s.name || '')}" required></div>
+          <div class="field"><label>Role</label><select class="select" id="stRole">${DB.ROLES.filter(r => r !== 'Patient').map(r => `<option ${s.role === r ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
+          <div class="field"><label>Department</label><select class="select" id="stDept">${DB.DEPARTMENTS.map(d => `<option ${s.department === d ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
+          <div class="field"><label>Phone</label><input class="input" id="stPhone" value="${esc(s.phone || '')}"></div>
+          <div class="field"><label>Shift</label><select class="select" id="stShift"><option ${s.shift === 'Day' ? 'selected' : ''}>Day</option><option ${s.shift === 'Night' ? 'selected' : ''}>Night</option></select></div>
+          <div class="field"><label>Salary (₹)</label><input class="input" type="number" id="stSalary" value="${s.salary || 15000}" required></div>
+        </div></form>`,
+        { footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveStaff(${id || 0})"><i class="fa-solid fa-save"></i> Save</button>` });
+    };
+    window.saveStaff = function(id) {
+      const data = { name: $('#stName').value, role: $('#stRole').value, department: $('#stDept').value, phone: $('#stPhone').value, shift: $('#stShift').value, salary: +$('#stSalary').value, status: 'Active' };
+      if (id) { DB.put('staff', id, data); showToast('Staff updated'); }
+      else { const n = DB.get().staff.length + 1; DB.add('staff', { id: Date.now(), staffId: `KMSH-ST-${String(n).padStart(4,'0')}`, ...data, created_at: new Date().toISOString() }); showToast('Staff added'); }
+      closeModal(); renderModule('staff');
+    };
+    window.delStaff = function(id) { confirmDialog('Delete Staff', 'Remove this staff member?', () => { DB.remove('staff', id); showToast('Deleted'); renderModule('staff'); }); };
+
+    /* ----------  Reports  ---------- */
+    function renderReports(c) {
+      const db = DB.get();
+      const totalRevenue = db.billing.reduce((s, b) => s + b.total, 0);
+      const totalCollected = db.billing.reduce((s, b) => s + b.paid, 0);
+      const totalBalance = db.billing.reduce((s, b) => s + b.balance, 0);
+      const deptStats = {};
+      db.patients.forEach(p => { deptStats[p.department] = (deptStats[p.department] || 0) + 1; });
+      const reportCards = [
+        { icon: 'user-injured', label: 'Total Patients', val: db.patients.length, color: 'ico-blue' },
+        { icon: 'user-doctor', label: 'Total Doctors', val: db.doctors.length, color: 'ico-green' },
+        { icon: 'calendar-check', label: 'Appointments', val: db.appointments.length, color: 'ico-purple' },
+        { icon: 'syringe', label: 'Surgeries', val: db.operations.length, color: 'ico-amber' },
+        { icon: 'flask', label: 'Lab Tests', val: db.labTests.length, color: 'ico-teal' },
+        { icon: 'indian-rupee-sign', label: 'Total Revenue', val: fmtMoney(totalRevenue), color: 'ico-green' },
+        { icon: 'circle-check', label: 'Collected', val: fmtMoney(totalCollected), color: 'ico-blue' },
+        { icon: 'circle-exclamation', label: 'Outstanding', val: fmtMoney(totalBalance), color: 'ico-red' },
+      ];
+      c.innerHTML = `
+        <div class="stats-grid">${reportCards.map(r => `
+          <div class="stat-card glass"><div class="ico ${r.color}"><i class="fa-solid fa-${r.icon}"></i></div>
+          <div class="meta"><strong>${r.val}</strong><span>${r.label}</span></div></div>`).join('')}</div>
+        <div class="panel glass">
+          <div class="panel-head"><h3><i class="fa-solid fa-building"></i> Department Statistics</h3>
+            <div class="panel-head-actions"><button class="btn btn-sm btn-ghost" onclick="printPage()"><i class="fa-solid fa-print"></i> Print</button></div>
+          </div>
+          <table class="data-table"><thead><tr><th>Department</th><th>Patients</th><th>Doctors</th></tr></thead><tbody>
+            ${Object.keys(deptStats).map(d => `<tr><td><strong>${d}</strong></td><td>${deptStats[d]}</td><td>${db.doctors.filter(x => x.department === d).length}</td></tr>`).join('')}
+          </tbody></table>
+        </div>`;
+    }
+
+    /* ----------  Departments  ---------- */
+    function renderDepartments(c) {
+      const db = DB.get();
+      c.innerHTML = `
+        <div class="panel-head"><h3><i class="fa-solid fa-building"></i> Departments</h3>
+          <div class="panel-head-actions"><button class="btn btn-sm" onclick="openDeptForm()"><i class="fa-solid fa-plus"></i> Add Department</button></div>
+        </div>
+        <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))" id="deptGrid"></div>`;
+      const draw = () => {
+        $('#deptGrid').innerHTML = db.departments.map(d => `
+          <div class="feature-card glass" style="position:relative">
+            <div class="ico ico-blue" style="margin-bottom:10px"><i class="fa-solid fa-hospital"></i></div>
+            <h3 style="font-size:1rem">${esc(d.name)}</h3>
+            <p class="text-muted" style="font-size:.82rem">${db.doctors.filter(x => x.department === d.name).length} doctors · ${db.patients.filter(p => p.department === d.name).length} patients</p>
+            <div style="position:absolute;top:14px;right:14px;display:flex;gap:6px">
+              <button class="btn-icon edit" onclick="openDeptForm(${d.id})"><i class="fa-solid fa-pen"></i></button>
+              <button class="btn-icon del" onclick="delDept(${d.id})"><i class="fa-solid fa-trash"></i></button>
+            </div>
+          </div>`).join('');
+      };
+      draw();
+    }
+    window.openDeptForm = function(id) {
+      const d = id ? DB.find('departments', id) : {};
+      openModal(`<i class="fa-solid fa-building"></i> ${id ? 'Edit' : 'Add'} Department`,
+        `<div class="field"><label>Department Name</label><input class="input" id="dpName" value="${esc(d.name || '')}" required></div>
+         <div class="field"><label>Head of Department</label><input class="input" id="dpHead" value="${esc(d.head || '')}"></div>`,
+        { footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveDept(${id || 0})"><i class="fa-solid fa-save"></i> Save</button>` });
+    };
+    window.saveDept = function(id) {
+      const data = { name: $('#dpName').value, head: $('#dpHead').value, status: 'Active' };
+      if (id) { DB.put('departments', id, data); showToast('Department updated'); }
+      else { DB.add('departments', { id: Date.now(), ...data, created_at: new Date().toISOString() }); showToast('Department added'); }
+      closeModal(); renderModule('departments');
+    };
+    window.delDept = function(id) { confirmDialog('Delete Department', 'Remove this department?', () => { DB.remove('departments', id); showToast('Deleted'); renderModule('departments'); }); };
+
+    /* ----------  Hash routing for module links  ---------- */
+    window.addEventListener('hashchange', () => {
+      const h = location.hash.slice(1);
+      if (h && h !== 'dashboard') openModule(h, h.charAt(0).toUpperCase() + h.slice(1));
+    });
+    window.addEventListener('load', () => {
+      const h = location.hash.slice(1);
+      if (h && h !== 'dashboard') setTimeout(() => openModule(h, h.charAt(0).toUpperCase() + h.slice(1)), 300);
+    });
+  </script>
+</body>
+</html>

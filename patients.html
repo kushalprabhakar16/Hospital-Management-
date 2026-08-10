@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="royal" data-mode="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Patients · Kushal Multi Speciality Hospital</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/responsive.css">
+</head>
+<body>
+  <script src="js/api.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    let sortKey = 'patientId', sortDir = 1, searchQ = '', filterStatus = '', filterDept = '', filterBlood = '';
+    const PAGE_SIZE = 8;
+
+    (async function() {
+      await initApp();
+      if (!Auth.requireAuth()) return;
+      mountShell('patients', 'Patient Management', renderPatients);
+    })();
+
+    function renderPatients(root) {
+      root.innerHTML = `
+        <div class="page-head">
+          <div><h2><i class="fa-solid fa-user-injured" style="color:var(--c-primary)"></i> Patient Management</h2>
+          <div class="sub">Manage unlimited patient records with full medical profiles</div></div>
+          <div class="page-head-actions">
+            <button class="btn btn-ghost" onclick="printPage()"><i class="fa-solid fa-print"></i> Print</button>
+            <button class="btn btn-ghost" onclick="exportPatients()"><i class="fa-solid fa-file-csv"></i> Export</button>
+            <button class="btn" onclick="openPatientForm()"><i class="fa-solid fa-plus"></i> Add Patient</button>
+          </div>
+        </div>
+        <div class="panel glass">
+          <div class="toolbar">
+            <div class="search-box"><i class="fa-solid fa-magnifying-glass"></i><input class="input" id="patSearch" placeholder="Search by name, ID, phone, disease..."></div>
+            <select class="select" id="fStatus"><option value="">All Status</option><option>Admitted</option><option>Critical</option><option>Outpatient</option><option>Discharged</option></select>
+            <select class="select" id="fDept"><option value="">All Departments</option>${DB.DEPARTMENTS.map(d => `<option>${d}</option>`).join('')}</select>
+            <select class="select" id="fBlood"><option value="">All Blood</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option><option>O+</option><option>O-</option></select>
+          </div>
+          <div id="patTable"></div>
+          <div id="patPager"></div>
+        </div>
+      `;
+      $('#patSearch').addEventListener('input', e => { searchQ = e.target.value.toLowerCase(); Pager.state.pat.page = 1; drawPatients(); });
+      $('#fStatus').addEventListener('change', e => { filterStatus = e.target.value; drawPatients(); });
+      $('#fDept').addEventListener('change', e => { filterDept = e.target.value; drawPatients(); });
+      $('#fBlood').addEventListener('change', e => { filterBlood = e.target.value; drawPatients(); });
+      drawPatients();
+    }
+
+    function getFiltered() {
+      const db = DB.get();
+      let rows = db.patients.filter(p =>
+        (!searchQ || p.name.toLowerCase().includes(searchQ) || p.patientId.toLowerCase().includes(searchQ) || (p.phone || '').includes(searchQ) || (p.disease || '').toLowerCase().includes(searchQ)) &&
+        (!filterStatus || p.status === filterStatus) &&
+        (!filterDept || p.department === filterDept) &&
+        (!filterBlood || p.blood === filterBlood));
+      rows.sort((a, b) => {
+        let va = a[sortKey], vb = b[sortKey];
+        if (sortKey === 'name') { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+        if (va < vb) return -sortDir; if (va > vb) return sortDir; return 0;
+      });
+      return rows;
+    }
+
+    function drawPatients() {
+      const all = getFiltered();
+      Pager.init('pat', all.length, PAGE_SIZE, drawPatients);
+      const s = Pager.state.pat;
+      const rows = all.slice((s.page - 1) * PAGE_SIZE, s.page * PAGE_SIZE);
+      $('#patTable').innerHTML = renderTable({
+        columns: [
+          { label: 'Patient', key: 'name', sort: 'name', render: r => `<div class="cell-main">${avatarHTML(r)}<div><strong>${esc(r.name)}</strong><div class="cell-sub">${r.patientId}</div></div></div>` },
+          { label: 'Gender', key: 'gender' },
+          { label: 'Age', key: 'age' },
+          { label: 'Blood', key: 'blood', render: r => `<span class="badge badge-error">${r.blood}</span>` },
+          { label: 'Disease', key: 'disease' },
+          { label: 'Doctor', key: 'doctor' },
+          { label: 'Department', key: 'department' },
+          { label: 'Phone', key: 'phone' },
+          { label: 'Admission', key: 'admissionDate', render: r => fmtDate(r.admissionDate) },
+          { label: 'Ward/Bed', key: 'ward', render: r => `${r.ward} · ${r.bed}` },
+          { label: 'Status', key: 'status', render: r => `<span class="badge ${r.status === 'Critical' ? 'badge-error' : r.status === 'Admitted' ? 'badge-info' : r.status === 'Discharged' ? 'badge-success' : 'badge-neutral'}">${r.status}</span>` },
+        ], rows, empty: 'No patients found. Click "Add Patient" to create one.',
+        actions: r => `
+          <button class="btn-icon view" title="View" onclick="viewPatient(${r.id})"><i class="fa-solid fa-eye"></i></button>
+          <button class="btn-icon edit" title="Edit" onclick="openPatientForm(${r.id})"><i class="fa-solid fa-pen"></i></button>
+          <button class="btn-icon del" title="Delete" onclick="delPatient(${r.id})"><i class="fa-solid fa-trash"></i></button>
+        `
+      });
+      // Sort handlers
+      $$('#patTable th[data-sort]').forEach(th => {
+        if (!th.dataset.sort) return;
+        th.classList.toggle('sorted', th.dataset.sort === sortKey);
+        const ic = th.querySelector('i');
+        if (ic) ic.className = sortKey === th.dataset.sort ? `fa-solid fa-sort-${sortDir > 0 ? 'up' : 'down'}` : 'fa-solid fa-sort';
+        th.onclick = () => { if (sortKey === th.dataset.sort) sortDir *= -1; else { sortKey = th.dataset.sort; sortDir = 1; } drawPatients(); };
+      });
+      $('#patPager').innerHTML = Pager.controls('pat', s.page, all.length, PAGE_SIZE);
+    }
+
+    /* ----------  Add/Edit form  ---------- */
+    window.openPatientForm = function(id) {
+      const db = DB.get();
+      const p = id ? DB.find('patients', id) : {};
+      const docOpts = db.doctors.map(d => `<option value="${esc(d.name)}" ${p.doctor === d.name ? 'selected' : ''}>${esc(d.name)} (${d.specialization})</option>`).join('');
+      const newId = id ? p.patientId : `KMSH-P-${String(DB.get().counters.patients + 1).padStart(6, '0')}`;
+      openModal(`<i class="fa-solid fa-user-plus"></i> ${id ? 'Edit' : 'Add'} Patient`,
+        `<form id="patForm">
+          <div class="photo-upload" style="margin-bottom:18px">
+            <div class="photo-preview" id="photoPreview">${p.photo ? '' : '<i class="fa-solid fa-user"></i>'}</div>
+            <div class="photo-side">
+              <label for="photoInput"><i class="fa-solid fa-upload"></i> Upload Photo</label>
+              <input type="file" id="photoInput" accept="image/*">
+              <div class="photo-hint">JPG/PNG · Max 5MB</div>
+            </div>
+          </div>
+          <div class="section-label">Patient Information</div>
+          <div class="form-grid">
+            <div class="field"><label>Patient ID <span class="req">*</span></label><input class="input" value="${newId}" readonly></div>
+            <div class="field"><label>Full Name <span class="req">*</span></label><input class="input" id="pName" value="${esc(p.name || '')}" required></div>
+            <div class="field"><label>Gender</label><select class="select" id="pGender"><option ${p.gender === 'Male' ? 'selected' : ''}>Male</option><option ${p.gender === 'Female' ? 'selected' : ''}>Female</option><option ${p.gender === 'Other' ? 'selected' : ''}>Other</option></select></div>
+            <div class="field"><label>Date of Birth</label><input class="input" type="date" id="pDob" value="${p.dob || ''}"></div>
+            <div class="field"><label>Age (auto)</label><input class="input" id="pAge" value="${p.age || 0}" readonly></div>
+            <div class="field"><label>Blood Group</label><select class="select" id="pBlood"><option ${p.blood === 'A+' ? 'selected' : ''}>A+</option><option ${p.blood === 'A-' ? 'selected' : ''}>A-</option><option ${p.blood === 'B+' ? 'selected' : ''}>B+</option><option ${p.blood === 'B-' ? 'selected' : ''}>B-</option><option ${p.blood === 'AB+' ? 'selected' : ''}>AB+</option><option ${p.blood === 'AB-' ? 'selected' : ''}>AB-</option><option ${p.blood === 'O+' ? 'selected' : ''}>O+</option><option ${p.blood === 'O-' ? 'selected' : ''}>O-</option></select></div>
+            <div class="field"><label>Height (cm)</label><input class="input" id="pHeight" value="${esc(p.height || '')}"></div>
+            <div class="field"><label>Weight (kg)</label><input class="input" id="pWeight" value="${esc(p.weight || '')}"></div>
+            <div class="field"><label>Phone <span class="req">*</span></label><input class="input" id="pPhone" value="${esc(p.phone || '')}" required></div>
+            <div class="field"><label>Email</label><input class="input" type="email" id="pEmail" value="${esc(p.email || '')}"></div>
+          </div>
+          <div class="field"><label>Address</label><textarea class="textarea" id="pAddr">${esc(p.address || '')}</textarea></div>
+          <div class="form-grid">
+            <div class="field"><label>Emergency Contact</label><input class="input" id="pEmg" value="${esc(p.emergency || '')}"></div>
+            <div class="field"><label>Insurance</label><input class="input" id="pIns" value="${esc(p.insurance || '')}"></div>
+          </div>
+          <div class="section-label">Medical Information</div>
+          <div class="form-grid">
+            <div class="field"><label>Disease</label><input class="input" id="pDisease" value="${esc(p.disease || '')}"></div>
+            <div class="field"><label>Diagnosis</label><input class="input" id="pDiag" value="${esc(p.diagnosis || '')}"></div>
+            <div class="field"><label>Allergies</label><input class="input" id="pAllergy" value="${esc(p.allergies || '')}"></div>
+            <div class="field"><label>Current Medication</label><input class="input" id="pMed" value="${esc(p.medication || '')}"></div>
+          </div>
+          <div class="field"><label>Medical History</label><textarea class="textarea" id="pHist">${esc(p.history || '')}</textarea></div>
+          <div class="section-label">Assignment</div>
+          <div class="form-grid-3">
+            <div class="field"><label>Assigned Doctor</label><select class="select" id="pDoc"><option value="">Select</option>${docOpts}</select></div>
+            <div class="field"><label>Department</label><select class="select" id="pDept">${DB.DEPARTMENTS.map(d => `<option ${p.department === d ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
+            <div class="field"><label>Ward</label><input class="input" id="pWard" value="${esc(p.ward || '')}"></div>
+            <div class="field"><label>Bed</label><input class="input" id="pBed" value="${esc(p.bed || '')}"></div>
+            <div class="field"><label>Admission Date</label><input class="input" type="date" id="pAdm" value="${p.admissionDate || new Date().toISOString().slice(0,10)}"></div>
+            <div class="field"><label>Discharge Date</label><input class="input" type="date" id="pDis" value="${p.dischargeDate || ''}"></div>
+            <div class="field"><label>Status</label><select class="select" id="pStat"><option ${p.status === 'Admitted' ? 'selected' : ''}>Admitted</option><option ${p.status === 'Critical' ? 'selected' : ''}>Critical</option><option ${p.status === 'Outpatient' ? 'selected' : ''}>Outpatient</option><option ${p.status === 'Discharged' ? 'selected' : ''}>Discharged</option></select></div>
+          </div>
+          <div class="field"><label>Notes</label><textarea class="textarea" id="pNotes">${esc(p.notes || '')}</textarea></div>
+        </form>`,
+        { size: 'lg', footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="savePatient(${id || 0})"><i class="fa-solid fa-save"></i> ${id ? 'Update' : 'Add'} Patient</button>` });
+
+      // Photo upload
+      if (p.photo) { const pv = $('#photoPreview'); pv.style.backgroundImage = `url(${p.photo})`; pv.style.backgroundSize = 'cover'; pv.style.backgroundPosition = 'center'; pv.dataset.dataUrl = p.photo; pv.innerHTML = ''; }
+      bindPhotoUpload('photoInput', 'photoPreview');
+      // Auto age
+      $('#pDob').addEventListener('change', e => { $('#pAge').value = DB.ageFromDOB(e.target.value); });
+    };
+
+    window.savePatient = function(id) {
+      const data = {
+        name: $('#pName').value, gender: $('#pGender').value, dob: $('#pDob').value, age: +$('#pAge').value || DB.ageFromDOB($('#pDob').value),
+        blood: $('#pBlood').value, height: $('#pHeight').value, weight: $('#pWeight').value, phone: $('#pPhone').value, email: $('#pEmail').value,
+        address: $('#pAddr').value, emergency: $('#pEmg').value, insurance: $('#pIns').value, disease: $('#pDisease').value, diagnosis: $('#pDiag').value,
+        allergies: $('#pAllergy').value, history: $('#pHist').value, medication: $('#pMed').value, doctor: $('#pDoc').value, department: $('#pDept').value,
+        ward: $('#pWard').value, bed: $('#pBed').value, admissionDate: $('#pAdm').value, dischargeDate: $('#pDis').value, status: $('#pStat').value,
+        notes: $('#pNotes').value, photo: $('#photoPreview').dataset.dataUrl || '',
+      };
+      if (id) { DB.put('patients', id, data); showToast('Patient updated successfully'); }
+      else {
+        const n = DB.nextCounter('patients');
+        DB.add('patients', { id: Date.now(), patientId: `KMSH-P-${String(n).padStart(6,'0')}`, ...data, documents: [], timeline: [
+          { stage: 'Registration', date: data.admissionDate, done: true },
+          { stage: 'Admission', date: data.status !== 'Outpatient' ? data.admissionDate : '', done: data.status !== 'Outpatient' },
+          { stage: 'Consultation', date: '', done: false },
+          { stage: 'Laboratory', date: '', done: false },
+          { stage: 'Diagnosis', date: '', done: false },
+          { stage: 'Medication', date: '', done: false },
+          { stage: 'Surgery', date: '', done: false },
+          { stage: 'Discharge', date: data.dischargeDate, done: !!data.dischargeDate },
+        ], created_at: new Date().toISOString() });
+        showToast('Patient added successfully');
+      }
+      closeModal(); drawPatients();
+      // Update nav badge
+      const badge = document.querySelector('[data-nav="patients"] .badge-count');
+      if (badge) badge.textContent = DB.get().patients.length;
+    };
+
+    window.delPatient = function(id) {
+      const p = DB.find('patients', id);
+      confirmDialog('Delete Patient', `Remove ${p.name} (${p.patientId})? This cannot be undone.`, () => {
+        DB.remove('patients', id); showToast('Patient deleted'); drawPatients();
+        const badge = document.querySelector('[data-nav="patients"] .badge-count');
+        if (badge) badge.textContent = DB.get().patients.length;
+      });
+    };
+
+    window.exportPatients = function() {
+      const cols = [
+        { label: 'Patient ID', key: 'patientId' }, { label: 'Name', key: 'name' }, { label: 'Gender', key: 'gender' },
+        { label: 'Age', key: 'age' }, { label: 'Blood', key: 'blood' }, { label: 'Disease', key: 'disease' },
+        { label: 'Doctor', key: 'doctor' }, { label: 'Department', key: 'department' }, { label: 'Phone', key: 'phone' },
+        { label: 'Status', key: 'status' }, { label: 'Admission', key: 'admissionDate' },
+      ];
+      exportCSV('patients.csv', cols, getFiltered());
+    };
+
+    /* ----------  Detail view  ---------- */
+    window.viewPatient = function(id) {
+      const p = DB.find('patients', id);
+      if (!p) return;
+      const photoHTML = p.photo ? `<img class="photo-lg" src="${p.photo}" alt="">` : `<div class="photo-lg">${initials(p.name)}</div>`;
+      const personal = [
+        ['Patient ID', p.patientId], ['Name', p.name], ['Age', p.age], ['Gender', p.gender], ['Date of Birth', fmtDate(p.dob)],
+        ['Blood Group', p.blood], ['Height', p.height + ' cm'], ['Weight', p.weight + ' kg'], ['Phone', p.phone],
+        ['Email', p.email], ['Address', p.address], ['Emergency Contact', p.emergency],
+      ];
+      const medical = [
+        ['Disease', p.disease], ['Diagnosis', p.diagnosis], ['Allergies', p.allergies], ['Medical History', p.history],
+        ['Current Medication', p.medication], ['Insurance', p.insurance], ['Assigned Doctor', p.doctor], ['Department', p.department],
+        ['Ward', p.ward], ['Bed', p.bed], ['Admission Date', fmtDate(p.admissionDate)], ['Discharge Date', fmtDate(p.dischargeDate)],
+        ['Status', p.status], ['Notes', p.notes],
+      ];
+      const timeline = (p.timeline || []).map(t => `
+        <div class="timeline-item ${t.done ? 'done' : ''}">
+          <div class="tl-title">${t.stage}</div>
+          <div class="tl-date">${t.date ? fmtDate(t.date) : 'Pending'}</div>
+        </div>`).join('');
+      const docs = (p.documents || []).map(d => `
+        <div class="doc-tile"><i class="fa-solid fa-file-medical"></i><div class="doc-name">${esc(d.name)}</div><div class="doc-meta">${d.type}</div></div>
+      `).join('') || '<p class="text-muted" style="grid-column:1/-1">No documents uploaded yet.</p>';
+
+      openModal(`<i class="fa-solid fa-user-injured"></i> Patient Profile`,
+        `${photoHTML ? '' : ''}
+        <div class="detail-hero">
+          ${photoHTML}
+          <div class="info" style="flex:1">
+            <h2>${esc(p.name)}</h2>
+            <div class="id-line"><i class="fa-solid fa-id-badge"></i> ${p.patientId} · ${p.gender}, ${p.age} yrs · Blood ${p.blood}</div>
+            <div class="row gap-sm">
+              <span class="badge ${p.status === 'Critical' ? 'badge-error' : p.status === 'Admitted' ? 'badge-info' : p.status === 'Discharged' ? 'badge-success' : 'badge-neutral'}">${p.status}</span>
+              <span class="badge badge-info">${p.department}</span>
+              <span class="badge badge-pink">Dr. ${esc(p.doctor)}</span>
+            </div>
+          </div>
+        </div>
+        <div class="tabs">
+          <button class="tab active" onclick="switchTab(event,'pPers')">Personal</button>
+          <button class="tab" onclick="switchTab(event,'pMed')">Medical</button>
+          <button class="tab" onclick="switchTab(event,'pTl')">Timeline</button>
+          <button class="tab" onclick="switchTab(event,'pDoc')">Documents</button>
+        </div>
+        <div id="pPers" class="tab-pane active">
+          <div class="detail-grid">${personal.map(([l, v]) => `<div class="detail-item"><span class="lbl">${l}</span><span class="val">${esc(v) || '—'}</span></div>`).join('')}</div>
+        </div>
+        <div id="pMed" class="tab-pane">
+          <div class="detail-grid">${medical.map(([l, v]) => `<div class="detail-item"><span class="lbl">${l}</span><span class="val">${esc(v) || '—'}</span></div>`).join('')}</div>
+        </div>
+        <div id="pTl" class="tab-pane">
+          <div class="timeline">${timeline}</div>
+        </div>
+        <div id="pDoc" class="tab-pane">
+          <div class="doc-grid">${docs}</div>
+          <button class="btn btn-ghost mt-2" onclick="uploadPatDoc(${id})"><i class="fa-solid fa-upload"></i> Upload Document</button>
+        </div>`,
+        { size: 'xl', footer: `<button class="btn btn-ghost" onclick="closeModal()"><i class="fa-solid fa-arrow-left"></i> Back</button>
+          <button class="btn btn-ghost" onclick="printPage()"><i class="fa-solid fa-print"></i> Print</button>
+          <button class="btn btn-secondary" onclick="closeModal();openPatientForm(${id})"><i class="fa-solid fa-pen"></i> Edit</button>
+          <button class="btn btn-danger" onclick="closeModal();delPatient(${id})"><i class="fa-solid fa-trash"></i> Delete</button>` });
+    };
+
+    window.switchTab = function(e, paneId) {
+      $$('.tab').forEach(t => t.classList.remove('active'));
+      $$('.tab-pane').forEach(p => p.classList.remove('active'));
+      e.target.classList.add('active');
+      $('#' + paneId).classList.add('active');
+    };
+
+    window.uploadPatDoc = function(id) {
+      const input = document.createElement('input');
+      input.type = 'file'; input.accept = 'image/*,application/pdf';
+      input.onchange = e => {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+          const p = DB.find('patients', id);
+          const docs = p.documents || [];
+          docs.push({ name: file.name, type: file.type.split('/')[1].toUpperCase(), data: ev.target.result });
+          DB.put('patients', id, { documents: docs });
+          showToast('Document uploaded');
+          closeModal(); viewPatient(id);
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
+    };
+  </script>
+</body>
+</html>

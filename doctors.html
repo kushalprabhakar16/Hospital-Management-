@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="royal" data-mode="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Doctors · Kushal Multi Speciality Hospital</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/responsive.css">
+</head>
+<body>
+  <script src="js/api.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    let sortKey = 'doctorId', sortDir = 1, searchQ = '', filterDept = '', filterStatus = '';
+    const PAGE_SIZE = 8;
+
+    (async function() {
+      await initApp();
+      if (!Auth.requireAuth()) return;
+      mountShell('doctors', 'Doctor Management', renderDoctors);
+    })();
+
+    function renderDoctors(root) {
+      root.innerHTML = `
+        <div class="page-head">
+          <div><h2><i class="fa-solid fa-user-doctor" style="color:var(--c-primary)"></i> Doctor Management</h2>
+          <div class="sub">Manage unlimited doctor profiles across all specialities</div></div>
+          <div class="page-head-actions">
+            <button class="btn btn-ghost" onclick="printPage()"><i class="fa-solid fa-print"></i> Print</button>
+            <button class="btn btn-ghost" onclick="exportDoctors()"><i class="fa-solid fa-file-csv"></i> Export</button>
+            <button class="btn" onclick="openDoctorForm()"><i class="fa-solid fa-plus"></i> Add Doctor</button>
+          </div>
+        </div>
+        <div class="panel glass">
+          <div class="toolbar">
+            <div class="search-box"><i class="fa-solid fa-magnifying-glass"></i><input class="input" id="docSearch" placeholder="Search by name, ID, specialisation..."></div>
+            <select class="select" id="fDept"><option value="">All Departments</option>${DB.DEPARTMENTS.map(d => `<option>${d}</option>`).join('')}</select>
+            <select class="select" id="fStatus"><option value="">All Status</option><option>Active</option><option>On Leave</option><option>Inactive</option></select>
+          </div>
+          <div id="docTable"></div>
+          <div id="docPager"></div>
+        </div>
+      `;
+      $('#docSearch').addEventListener('input', e => { searchQ = e.target.value.toLowerCase(); Pager.state.doc.page = 1; drawDoctors(); });
+      $('#fDept').addEventListener('change', e => { filterDept = e.target.value; drawDoctors(); });
+      $('#fStatus').addEventListener('change', e => { filterStatus = e.target.value; drawDoctors(); });
+      drawDoctors();
+    }
+
+    function getFiltered() {
+      const db = DB.get();
+      let rows = db.doctors.filter(d =>
+        (!searchQ || d.name.toLowerCase().includes(searchQ) || d.doctorId.toLowerCase().includes(searchQ) || (d.specialization || '').toLowerCase().includes(searchQ) || (d.phone || '').includes(searchQ)) &&
+        (!filterDept || d.department === filterDept) &&
+        (!filterStatus || d.status === filterStatus));
+      rows.sort((a, b) => {
+        let va = a[sortKey], vb = b[sortKey];
+        if (typeof va === 'string') { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+        if (va < vb) return -sortDir; if (va > vb) return sortDir; return 0;
+      });
+      return rows;
+    }
+
+    function drawDoctors() {
+      const all = getFiltered();
+      Pager.init('doc', all.length, PAGE_SIZE, drawDoctors);
+      const s = Pager.state.doc;
+      const rows = all.slice((s.page - 1) * PAGE_SIZE, s.page * PAGE_SIZE);
+      $('#docTable').innerHTML = renderTable({
+        columns: [
+          { label: 'Doctor', key: 'name', sort: 'name', render: r => `<div class="cell-main">${avatarHTML(r)}<div><strong>${esc(r.name)}</strong><div class="cell-sub">${r.doctorId}</div></div></div>` },
+          { label: 'Qualification', key: 'qualification' },
+          { label: 'Specialisation', key: 'specialization' },
+          { label: 'Department', key: 'department' },
+          { label: 'Experience', key: 'experience', render: r => `${r.experience} yrs` },
+          { label: 'Fee', key: 'fee', render: r => fmtMoney(r.fee) },
+          { label: 'Phone', key: 'phone' },
+          { label: 'Availability', key: 'days' },
+          { label: 'Status', key: 'status', render: r => `<span class="badge ${r.status === 'Active' ? 'badge-success' : r.status === 'On Leave' ? 'badge-warning' : 'badge-neutral'}">${r.status}</span>` },
+        ], rows, empty: 'No doctors found. Click "Add Doctor" to create one.',
+        actions: r => `
+          <button class="btn-icon view" title="View" onclick="viewDoctor(${r.id})"><i class="fa-solid fa-eye"></i></button>
+          <button class="btn-icon edit" title="Edit" onclick="openDoctorForm(${r.id})"><i class="fa-solid fa-pen"></i></button>
+          <button class="btn-icon del" title="Delete" onclick="delDoctor(${r.id})"><i class="fa-solid fa-trash"></i></button>
+        `
+      });
+      $$('#docTable th[data-sort]').forEach(th => {
+        if (!th.dataset.sort) return;
+        th.classList.toggle('sorted', th.dataset.sort === sortKey);
+        const ic = th.querySelector('i');
+        if (ic) ic.className = sortKey === th.dataset.sort ? `fa-solid fa-sort-${sortDir > 0 ? 'up' : 'down'}` : 'fa-solid fa-sort';
+        th.onclick = () => { if (sortKey === th.dataset.sort) sortDir *= -1; else { sortKey = th.dataset.sort; sortDir = 1; } drawDoctors(); };
+      });
+      $('#docPager').innerHTML = Pager.controls('doc', s.page, all.length, PAGE_SIZE);
+    }
+
+    /* ----------  Add/Edit form  ---------- */
+    window.openDoctorForm = function(id) {
+      const d = id ? DB.find('doctors', id) : {};
+      const newId = id ? d.doctorId : `KMSH-D-${String(DB.get().counters.doctors + 1).padStart(6, '0')}`;
+      openModal(`<i class="fa-solid fa-user-doctor"></i> ${id ? 'Edit' : 'Add'} Doctor`,
+        `<form id="docForm">
+          <div class="photo-upload" style="margin-bottom:18px">
+            <div class="photo-preview" id="photoPreview">${d.photo ? '' : '<i class="fa-solid fa-user-doctor"></i>'}</div>
+            <div class="photo-side">
+              <label for="photoInput"><i class="fa-solid fa-upload"></i> Upload Photo</label>
+              <input type="file" id="photoInput" accept="image/*">
+              <div class="photo-hint">JPG/PNG · Max 5MB</div>
+            </div>
+          </div>
+          <div class="section-label">Personal Details</div>
+          <div class="form-grid">
+            <div class="field"><label>Doctor ID <span class="req">*</span></label><input class="input" value="${newId}" readonly></div>
+            <div class="field"><label>Full Name <span class="req">*</span></label><input class="input" id="dName" value="${esc(d.name || '')}" required></div>
+            <div class="field"><label>Gender</label><select class="select" id="dGender"><option ${d.gender === 'Male' ? 'selected' : ''}>Male</option><option ${d.gender === 'Female' ? 'selected' : ''}>Female</option><option ${d.gender === 'Other' ? 'selected' : ''}>Other</option></select></div>
+            <div class="field"><label>Date of Birth</label><input class="input" type="date" id="dDob" value="${d.dob || ''}"></div>
+            <div class="field"><label>Phone <span class="req">*</span></label><input class="input" id="dPhone" value="${esc(d.phone || '')}" required></div>
+            <div class="field"><label>Email</label><input class="input" type="email" id="dEmail" value="${esc(d.email || '')}"></div>
+            <div class="field"><label>Address</label><input class="input" id="dAddr" value="${esc(d.address || '')}"></div>
+            <div class="field"><label>Room Number</label><input class="input" id="dRoom" value="${esc(d.room || '')}"></div>
+          </div>
+          <div class="section-label">Professional Details</div>
+          <div class="form-grid">
+            <div class="field"><label>Qualification</label><input class="input" id="dQual" value="${esc(d.qualification || '')}"></div>
+            <div class="field"><label>Specialisation</label><input class="input" id="dSpec" value="${esc(d.specialization || '')}"></div>
+            <div class="field"><label>Department</label><select class="select" id="dDept">${DB.DEPARTMENTS.map(x => `<option ${d.department === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+            <div class="field"><label>Experience (years)</label><input class="input" type="number" id="dExp" value="${d.experience || 0}"></div>
+            <div class="field"><label>Medical License</label><input class="input" id="dLic" value="${esc(d.license || '')}"></div>
+            <div class="field"><label>Consultation Fee (₹)</label><input class="input" type="number" id="dFee" value="${d.fee || 500}"></div>
+            <div class="field"><label>Available Days</label><input class="input" id="dDays" value="${esc(d.days || 'Mon-Sat')}"></div>
+            <div class="field"><label>Available Time</label><input class="input" id="dTime" value="${esc(d.time || '09:00-17:00')}"></div>
+            <div class="field"><label>Languages</label><input class="input" id="dLang" value="${esc(d.languages || '')}"></div>
+            <div class="field"><label>Status</label><select class="select" id="dStat"><option ${d.status === 'Active' ? 'selected' : ''}>Active</option><option ${d.status === 'On Leave' ? 'selected' : ''}>On Leave</option><option ${d.status === 'Inactive' ? 'selected' : ''}>Inactive</option></select></div>
+          </div>
+          <div class="field"><label>Biography</label><textarea class="textarea" id="dBio">${esc(d.bio || '')}</textarea></div>
+          <div class="form-grid">
+            <div class="field"><label>Certifications</label><input class="input" id="dCert" value="${esc(d.certifications || '')}"></div>
+            <div class="field"><label>Awards</label><input class="input" id="dAwards" value="${esc(d.awards || '')}"></div>
+          </div>
+        </form>`,
+        { size: 'lg', footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveDoctor(${id || 0})"><i class="fa-solid fa-save"></i> ${id ? 'Update' : 'Add'} Doctor</button>` });
+
+      if (d.photo) { const pv = $('#photoPreview'); pv.style.backgroundImage = `url(${d.photo})`; pv.style.backgroundSize = 'cover'; pv.style.backgroundPosition = 'center'; pv.dataset.dataUrl = d.photo; pv.innerHTML = ''; }
+      bindPhotoUpload('photoInput', 'photoPreview');
+    };
+
+    window.saveDoctor = function(id) {
+      const data = {
+        name: $('#dName').value, gender: $('#dGender').value, dob: $('#dDob').value, phone: $('#dPhone').value, email: $('#dEmail').value,
+        address: $('#dAddr').value, room: $('#dRoom').value, qualification: $('#dQual').value, specialization: $('#dSpec').value,
+        department: $('#dDept').value, experience: +$('#dExp').value, license: $('#dLic').value, fee: +$('#dFee').value,
+        days: $('#dDays').value, time: $('#dTime').value, languages: $('#dLang').value, bio: $('#dBio').value,
+        certifications: $('#dCert').value, awards: $('#dAwards').value, status: $('#dStat').value,
+        photo: $('#photoPreview').dataset.dataUrl || '',
+      };
+      if (id) {
+        DB.put('doctors', id, data); showToast('Doctor updated successfully');
+      } else {
+        const n = DB.nextCounter('doctors');
+        DB.add('doctors', { id: Date.now(), doctorId: `KMSH-D-${String(n).padStart(6,'0')}`, ...data, documents: [],
+          stats: { patients: 0, appointments: 0, surgeries: 0, consultations: 0 }, created_at: new Date().toISOString() });
+        showToast('Doctor added successfully');
+      }
+      closeModal(); drawDoctors();
+      const badge = document.querySelector('[data-nav="doctors"] .badge-count');
+      if (badge) badge.textContent = DB.get().doctors.length;
+    };
+
+    window.delDoctor = function(id) {
+      const d = DB.find('doctors', id);
+      confirmDialog('Delete Doctor', `Remove ${d.name} (${d.doctorId})? This cannot be undone.`, () => {
+        DB.remove('doctors', id); showToast('Doctor deleted'); drawDoctors();
+        const badge = document.querySelector('[data-nav="doctors"] .badge-count');
+        if (badge) badge.textContent = DB.get().doctors.length;
+      });
+    };
+
+    window.exportDoctors = function() {
+      const cols = [
+        { label: 'Doctor ID', key: 'doctorId' }, { label: 'Name', key: 'name' }, { label: 'Qualification', key: 'qualification' },
+        { label: 'Specialisation', key: 'specialization' }, { label: 'Department', key: 'department' }, { label: 'Experience', key: 'experience' },
+        { label: 'Fee', key: 'fee' }, { label: 'Phone', key: 'phone' }, { label: 'Status', key: 'status' },
+      ];
+      exportCSV('doctors.csv', cols, getFiltered());
+    };
+
+    /* ----------  Detail view  ---------- */
+    window.viewDoctor = function(id) {
+      const d = DB.find('doctors', id);
+      if (!d) return;
+      const photoHTML = d.photo ? `<img class="photo-lg" src="${d.photo}" alt="">` : `<div class="photo-lg">${initials(d.name)}</div>`;
+      const personal = [
+        ['Doctor ID', d.doctorId], ['Name', d.name], ['Gender', d.gender], ['Date of Birth', fmtDate(d.dob)],
+        ['Phone', d.phone], ['Email', d.email], ['Address', d.address], ['Room Number', d.room],
+      ];
+      const prof = [
+        ['Qualification', d.qualification], ['Specialisation', d.specialization], ['Department', d.department],
+        ['Experience', d.experience + ' years'], ['Medical License', d.license], ['Consultation Fee', fmtMoney(d.fee)],
+        ['Available Days', d.days], ['Available Time', d.time], ['Languages', d.languages],
+        ['Biography', d.bio], ['Certifications', d.certifications], ['Awards', d.awards],
+      ];
+      const st = d.stats || {};
+      const stats = [
+        ['Patients Treated', st.patients || 0], ['Appointments', st.appointments || 0],
+        ['Consultations', st.consultations || 0], ['Surgeries', st.surgeries || 0], ['Experience', d.experience + ' yrs'],
+      ];
+      const docs = (d.documents || []).map(doc => `
+        <div class="doc-tile"><i class="fa-solid fa-file-medical"></i><div class="doc-name">${esc(doc.name)}</div><div class="doc-meta">${doc.type}</div></div>
+      `).join('') || '<p class="text-muted" style="grid-column:1/-1">No documents uploaded yet.</p>';
+
+      openModal(`<i class="fa-solid fa-user-doctor"></i> Doctor Profile`,
+        `<div class="detail-hero">
+          ${photoHTML}
+          <div class="info" style="flex:1">
+            <h2>${esc(d.name)}</h2>
+            <div class="id-line"><i class="fa-solid fa-id-badge"></i> ${d.doctorId} · ${d.specialization}</div>
+            <div class="row gap-sm">
+              <span class="badge ${d.status === 'Active' ? 'badge-success' : 'badge-warning'}">${d.status}</span>
+              <span class="badge badge-info">${d.department}</span>
+              <span class="badge badge-pink">${d.experience} yrs experience</span>
+            </div>
+          </div>
+        </div>
+        <div class="tabs">
+          <button class="tab active" onclick="switchTab(event,'dPers')">Personal</button>
+          <button class="tab" onclick="switchTab(event,'dProf')">Professional</button>
+          <button class="tab" onclick="switchTab(event,'dStat')">Statistics</button>
+          <button class="tab" onclick="switchTab(event,'dDoc')">Documents</button>
+        </div>
+        <div id="dPers" class="tab-pane active">
+          <div class="detail-grid">${personal.map(([l, v]) => `<div class="detail-item"><span class="lbl">${l}</span><span class="val">${esc(v) || '—'}</span></div>`).join('')}</div>
+        </div>
+        <div id="dProf" class="tab-pane">
+          <div class="detail-grid">${prof.map(([l, v]) => `<div class="detail-item"><span class="lbl">${l}</span><span class="val">${esc(v) || '—'}</span></div>`).join('')}</div>
+        </div>
+        <div id="dStat" class="tab-pane">
+          <div class="stats-grid">${stats.map(([l, v]) => `<div class="stat-card glass"><div class="meta"><strong>${v}</strong><span>${l}</span></div></div>`).join('')}</div>
+        </div>
+        <div id="dDoc" class="tab-pane">
+          <div class="doc-grid">${docs}</div>
+          <button class="btn btn-ghost mt-2" onclick="uploadDocDoc(${id})"><i class="fa-solid fa-upload"></i> Upload Document</button>
+        </div>`,
+        { size: 'xl', footer: `<button class="btn btn-ghost" onclick="closeModal()"><i class="fa-solid fa-arrow-left"></i> Back</button>
+          <button class="btn btn-ghost" onclick="printPage()"><i class="fa-solid fa-print"></i> Print</button>
+          <button class="btn btn-secondary" onclick="closeModal();openDoctorForm(${id})"><i class="fa-solid fa-pen"></i> Edit</button>
+          <button class="btn btn-danger" onclick="closeModal();delDoctor(${id})"><i class="fa-solid fa-trash"></i> Delete</button>` });
+    };
+
+    window.uploadDocDoc = function(id) {
+      const input = document.createElement('input');
+      input.type = 'file'; input.accept = 'image/*,application/pdf';
+      input.onchange = e => {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+          const d = DB.find('doctors', id);
+          const docs = d.documents || [];
+          docs.push({ name: file.name, type: file.type.split('/')[1].toUpperCase(), data: ev.target.result });
+          DB.put('doctors', id, { documents: docs });
+          showToast('Document uploaded');
+          closeModal(); viewDoctor(id);
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
+    };
+  </script>
+</body>
+</html>
